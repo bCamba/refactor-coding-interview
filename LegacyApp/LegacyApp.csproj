@@ -2,11 +2,13 @@
 
     <PropertyGroup>
         <TargetFramework>net7.0</TargetFramework>
+        <Nullable>enable</Nullable>
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="System.Configuration.ConfigurationManager" Version="5.0.0" />
-      <PackageReference Include="System.Data.SqlClient" Version="4.8.2" />
+      <PackageReference Include="CommunityToolkit.Diagnostics" Version="8.2.2" />
+      <PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.0" />
+      <PackageReference Include="System.Data.SqlClient" Version="4.8.6" />
       <PackageReference Include="System.Diagnostics.Tools" Version="4.3.0" />
       <PackageReference Include="System.Private.ServiceModel" Version="4.8.1" />
       <PackageReference Include="System.ServiceModel.Primitives" Version="4.8.1" />

@@ -1,77 +1,117 @@
-﻿using System;
+﻿using CommunityToolkit.Diagnostics;
+using LegacyApp.Domain;
+using LegacyApp.Infrastructure;
+using LegacyApp.Infrastructure.SqlServer;
+using System;
+using System.Threading.Tasks;
 
-namespace LegacyApp
+namespace LegacyApp;
+
+public class UserService : IUserService, IDisposable
 {
-    public class UserService
+    private bool disposed;
+
+    private readonly IClientRepository clientRepository;
+    private readonly IUserCreditService userCreditService;
+    private readonly IUserRepository userRepository;
+
+    public UserService(IClientRepository? clientRepository = null,
+                       IUserCreditService? userCreditService = null,
+                       IUserRepository? userRepository = null)
     {
-        public bool AddUser(string firname, string surname, string email, DateTime dateOfBirth, int clientId)
+        this.clientRepository = clientRepository ?? new ClientRepository();
+        this.userCreditService = userCreditService ?? new UserCreditServiceClient();
+        this.userRepository = userRepository ?? new UserRepository();
+    }
+
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!disposed)
         {
-            if (string.IsNullOrEmpty(firname) || string.IsNullOrEmpty(surname))
+            if (disposing)
             {
-                return false;
+                // dispose of managed resources.
             }
+            disposed = true;
+        }
+    }
 
-            if (!email.Contains("@") && !email.Contains("."))
-            {
-                return false;
-            }
+    public bool AddUser(string firstname, string surname, string email, DateTime dateOfBirth, int clientId)
+    {
+        return AddUserAsync(firstname, surname, email, DateOnly.FromDateTime(dateOfBirth), clientId).Result;
+    }
 
-            var now = DateTime.Now;
-            int age = now.Year - dateOfBirth.Year;
-            if (now.Month < dateOfBirth.Month || (now.Month == dateOfBirth.Month && now.Day < dateOfBirth.Day)) age--;
+    public async Task<bool> AddUserAsync(string firstname, string surname, string email, DateOnly dateOfBirth, int clientId)
+    {
+        try
+        {
+            Guard.IsNotNullOrWhiteSpace(firstname);
+            Guard.IsNotNullOrWhiteSpace(surname);
+            Guard.IsNotNullOrWhiteSpace(email);
+            Guard.IsTrue(email.Contains('@') && email.Contains('.'));
+            Guard.IsGreaterThanOrEqualTo(GetAge(dateOfBirth), 21);
 
-            if (age < 21)
-            {
-                return false;
-            }
+            Client? client = await clientRepository.GetByIdAsync(clientId);
+            Guard.IsNotNull(client);
 
-            var clientRepository = new ClientRepository();
-            var client = clientRepository.GetById(clientId);
-
-            var user = new User
+            User user = new()
             {
                 Client = client,
-                DateOfBirth = dateOfBirth,
+                DateOfBirth = dateOfBirth.ToDateTime(TimeOnly.MinValue),
                 EmailAddress = email,
-                Firstname = firname,
+                Firstname = firstname,
                 Surname = surname
             };
 
-            if (client.Name == "VeryImportantClient")
+            await GetCreditLimitAsync(client, user);
+
+            if (user.HasCreditLimit)
             {
-                // Skip credit check
-                user.HasCreditLimit = false;
-            }
-            else if (client.Name == "ImportantClient")
-            {
-                // Do credit check and double credit limit
-                user.HasCreditLimit = true;
-                using (var userCreditService = new UserCreditServiceClient())
-                {
-                    var creditLimit = userCreditService.GetCreditLimit(user.Firstname, user.Surname, user.DateOfBirth);
-                    creditLimit = creditLimit * 2;
-                    user.CreditLimit = creditLimit;
-                }
-            }
-            else
-            {
-                // Do credit check
-                user.HasCreditLimit = true;
-                using (var userCreditService = new UserCreditServiceClient())
-                {
-                    var creditLimit = userCreditService.GetCreditLimit(user.Firstname, user.Surname, user.DateOfBirth);
-                    user.CreditLimit = creditLimit;
-                }
+                Guard.IsGreaterThanOrEqualTo(user.CreditLimit, 500);
             }
 
-            if (user.HasCreditLimit && user.CreditLimit < 500)
+            await userRepository.AddUserAsync(user);
+        }
+        catch
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static int GetAge(DateOnly dateOfBirth)
+    {
+        DateTime now = DateTime.Now;
+        int age = now.Year - dateOfBirth.Year;
+        if (now.Month < dateOfBirth.Month || (now.Month == dateOfBirth.Month && now.Day < dateOfBirth.Day)) age--;
+        return age;
+    }
+
+    private async Task GetCreditLimitAsync(Client client, User user)
+    {
+        if (client.Name == Client.VeryImportantClient)
+        {
+            // Skip credit check
+        }
+        else
+        {
+            // Do credit check and double credit limit
+            int creditLimit = await Task.Run(() =>
             {
-                return false;
+                return userCreditService.GetCreditLimit(user.Firstname, user.Surname, user.DateOfBirth);
+            });
+            if (client.Name == Client.ImportantClient)
+            {
+                creditLimit *= 2;
             }
-
-            UserDataAccess.AddUser(user);
-
-            return true;
+            user.CreditLimit = creditLimit;
         }
     }
 }
